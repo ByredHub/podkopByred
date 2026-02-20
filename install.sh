@@ -782,10 +782,18 @@ wg_awg_setup() {
     printf "\n${COLOR_CYAN}${COLOR_BOLD}Paste your full WG/AWG config below, then press Enter on empty line:${COLOR_RESET}\n"
     log_info "(paste the [Interface] + [Peer] block, then hit Enter twice)"
 
-    # Read multiline config
+    # Read multiline config (stop on two consecutive empty lines or EOF)
     WG_CONFIG=""
+    PREV_EMPTY=0
     while IFS= read -r line; do
-        [ -z "$line" ] && [ -n "$WG_CONFIG" ] && break
+        if [ -z "$line" ]; then
+            if [ "$PREV_EMPTY" -eq 1 ] && [ -n "$WG_CONFIG" ]; then
+                break
+            fi
+            PREV_EMPTY=1
+        else
+            PREV_EMPTY=0
+        fi
         WG_CONFIG="${WG_CONFIG}${line}
 "
     done
