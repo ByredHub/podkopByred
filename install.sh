@@ -90,7 +90,7 @@ download_with_progress() {
     return 0
 }
 
-# --- #4: Checksum verification for downloaded packages ---
+# --- #4: Package verification ---
 verify_pkg() {
     local filepath="$1"
     local filename=$(basename "$filepath")
@@ -100,25 +100,21 @@ verify_pkg() {
         return 1
     fi
 
-    if [ "$PKG_EXT" = "ipk" ]; then
-        # ipk is an ar archive
-        if ! head -c 8 "$filepath" | grep -q '!<arch>'; then
-            log_error "$filename is not a valid .ipk package"
-            return 1
-        fi
-    else
-        # apk is a gzip/tar archive
-        if ! head -c 2 "$filepath" | grep -q $'\x1f\x8b' 2>/dev/null; then
-            # Fallback: check file size is reasonable (>1KB)
-            local fsize=$(wc -c < "$filepath")
-            if [ "$fsize" -lt 1024 ]; then
-                log_error "$filename appears invalid (too small: ${fsize} bytes)"
-                return 1
-            fi
-        fi
+    local fsize=$(wc -c < "$filepath")
+
+    # Check if file is HTML (GitHub error page)
+    if head -c 15 "$filepath" 2>/dev/null | grep -qi '<!doctype\|<html'; then
+        log_error "$filename is an HTML page, not a package (download failed)"
+        return 1
     fi
 
-    log_info "$filename verified OK"
+    # Minimum size check (valid packages are > 1KB)
+    if [ "$fsize" -lt 1024 ]; then
+        log_error "$filename is too small (${fsize} bytes) — likely corrupted"
+        return 1
+    fi
+
+    log_info "$filename verified OK (${fsize} bytes)"
     return 0
 }
 
