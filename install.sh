@@ -625,7 +625,7 @@ add_tunnel() {
 
     2)
         log_step "Installing WireGuard"
-        if ! opkg install wireguard-tools luci-proto-wireguard luci-app-wireguard; then
+        if ! opkg install wireguard-tools luci-proto-wireguard; then
             log_error "Failed to install WireGuard packages"
             rollback
         fi
