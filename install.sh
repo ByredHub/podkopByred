@@ -445,12 +445,14 @@ main() {
     fi
 
     # Install podkop packages
-    # If not using sing-box, skip its dependency with --force-depends (saves ~43MB)
+    # If not using sing-box, use --nodeps to skip sing-box dependency entirely (saves ~43MB)
     log_step "Installing podkop packages"
     OPKG_EXTRA=""
     if [ "$TUNNEL" != "1" ] && [ "$PKG_MGR" = "opkg" ]; then
-        OPKG_EXTRA="--force-depends"
         log_info "Skipping sing-box dependency (not needed for this tunnel type)"
+        # Pre-install only the needed dependencies
+        opkg install kmod-inet-diag 2>/dev/null
+        OPKG_EXTRA="--nodeps"
     fi
 
     if [ "$PKG_MGR" = "apk" ]; then
