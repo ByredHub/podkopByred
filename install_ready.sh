@@ -1,4 +1,4 @@
-#!/bin/sh
+﻿#!/bin/sh
 # Podkop Installer v0.2.5-improved
 # Fixes: #1 #2 #3 #4 #5 | Improvements: #13 #14 #15 #16 #17 #18 #19
 
@@ -7,18 +7,6 @@ REPO="https://api.github.com/repos/itdoginfo/podkop/releases/latest"
 IS_SHOULD_RESTART_NETWORK=
 DOWNLOAD_DIR="/tmp/podkop"
 INSTALLED_PACKAGES=""
-
-# Detect package format: OpenWrt 24.10+ uses apk, older uses opkg/ipk
-detect_pkg_format() {
-    if command -v apk >/dev/null 2>&1; then
-        PKG_EXT="apk"
-        PKG_MGR="apk"
-    else
-        PKG_EXT="ipk"
-        PKG_MGR="opkg"
-    fi
-}
-detect_pkg_format
 REQUIRED_SPACE=20480  # Fix #5: 20MB in KB (was 1024 with comment saying 20MB)
 
 # --- #14: Colored logs with severity levels ---
@@ -90,8 +78,8 @@ download_with_progress() {
     return 0
 }
 
-# --- #4: Checksum verification for downloaded packages ---
-verify_pkg() {
+# --- #4: Checksum verification for downloaded .ipk ---
+verify_ipk() {
     local filepath="$1"
     local filename=$(basename "$filepath")
 
@@ -100,22 +88,10 @@ verify_pkg() {
         return 1
     fi
 
-    if [ "$PKG_EXT" = "ipk" ]; then
-        # ipk is an ar archive
-        if ! head -c 8 "$filepath" | grep -q '!<arch>'; then
-            log_error "$filename is not a valid .ipk package"
-            return 1
-        fi
-    else
-        # apk is a gzip/tar archive
-        if ! head -c 2 "$filepath" | grep -q $'\x1f\x8b' 2>/dev/null; then
-            # Fallback: check file size is reasonable (>1KB)
-            local fsize=$(wc -c < "$filepath")
-            if [ "$fsize" -lt 1024 ]; then
-                log_error "$filename appears invalid (too small: ${fsize} bytes)"
-                return 1
-            fi
-        fi
+    # Check if it's a valid ipk (ar archive)
+    if ! head -c 8 "$filepath" | grep -q '!<arch>'; then
+        log_error "$filename is not a valid .ipk package"
+        return 1
     fi
 
     log_info "$filename verified OK"
@@ -205,15 +181,9 @@ uninstall() {
     fi
 
     log_info "Removing packages..."
-    if [ "$PKG_MGR" = "apk" ]; then
-        apk del luci-i18n-podkop-ru 2>/dev/null
-        apk del luci-app-podkop 2>/dev/null
-        apk del podkop 2>/dev/null
-    else
-        opkg remove luci-i18n-podkop-ru 2>/dev/null
-        opkg remove luci-app-podkop 2>/dev/null
-        opkg remove podkop 2>/dev/null
-    fi
+    opkg remove luci-i18n-podkop-ru 2>/dev/null
+    opkg remove luci-app-podkop 2>/dev/null
+    opkg remove podkop 2>/dev/null
 
     log_info "Cleaning up routing tables..."
     grep -q "105 podkop" /etc/iproute2/rt_tables 2>/dev/null && \
@@ -360,51 +330,36 @@ main() {
         fi
     fi
 
-    log_info "Package format: .$PKG_EXT (package manager: $PKG_MGR)"
-    wget -qO- "$REPO" | grep -o "https://[^\"]*\\.$PKG_EXT" | while read -r url; do
+    wget -qO- "$REPO" | grep -o 'https://[^"]*\.ipk' | while read -r url; do
         filename=$(basename "$url")
         download_with_progress "$url" "$DOWNLOAD_DIR/$filename" "$filename"
     done
 
     # Verify downloaded packages (#4)
     log_step "Verifying downloaded packages"
-    for pkg in "$DOWNLOAD_DIR"/*.$PKG_EXT; do
-        [ -f "$pkg" ] || continue
-        if ! verify_pkg "$pkg"; then
+    for ipk in "$DOWNLOAD_DIR"/*.ipk; do
+        [ -f "$ipk" ] || continue
+        if ! verify_ipk "$ipk"; then
             log_error "Package verification failed. Aborting."
             exit 1
         fi
     done
 
     log_step "Updating package lists"
-    if [ "$PKG_MGR" = "apk" ]; then
-        apk update || { log_error "apk update failed"; exit 1; }
-    else
-        opkg update || { log_error "opkg update failed"; exit 1; }
-    fi
+    opkg update || { log_error "opkg update failed"; exit 1; }
 
     # dnsmasq-full
-    if [ "$PKG_MGR" = "apk" ]; then
-        if apk list --installed 2>/dev/null | grep -q dnsmasq-full; then
-            log_info "dnsmasq-full already installed"
-        else
-            log_step "Installing dnsmasq-full"
-            apk add dnsmasq-full || { log_error "Failed to install dnsmasq-full"; rollback; }
-            track_install "dnsmasq-full"
-        fi
+    if opkg list-installed | grep -q dnsmasq-full; then
+        log_info "dnsmasq-full already installed"
     else
-        if opkg list-installed | grep -q dnsmasq-full; then
-            log_info "dnsmasq-full already installed"
-        else
-            log_step "Installing dnsmasq-full"
-            cd /tmp/ && opkg download dnsmasq-full
-            if ! (opkg remove dnsmasq && opkg install dnsmasq-full --cache /tmp/); then
-                log_error "Failed to install dnsmasq-full"
-                rollback
-            fi
-            track_install "dnsmasq-full"
-            [ -f /etc/config/dhcp-opkg ] && cp /etc/config/dhcp /etc/config/dhcp-old && mv /etc/config/dhcp-opkg /etc/config/dhcp
+        log_step "Installing dnsmasq-full"
+        cd /tmp/ && opkg download dnsmasq-full
+        if ! (opkg remove dnsmasq && opkg install dnsmasq-full --cache /tmp/); then
+            log_error "Failed to install dnsmasq-full"
+            rollback
         fi
+        track_install "dnsmasq-full"
+        [ -f /etc/config/dhcp-opkg ] && cp /etc/config/dhcp /etc/config/dhcp-old && mv /etc/config/dhcp-opkg /etc/config/dhcp
     fi
 
     # confdir for OpenWrt 24.x (Fix #3: typo "alreadt" -> "already")
@@ -450,54 +405,29 @@ main() {
 
     # Install podkop packages
     log_step "Installing podkop packages"
-    if [ "$PKG_MGR" = "apk" ]; then
-        if ! apk add --allow-untrusted "$DOWNLOAD_DIR"/podkop*.$PKG_EXT; then
-            log_error "Failed to install podkop"
-            rollback
-        fi
-        track_install "podkop"
-
-        if ! apk add --allow-untrusted "$DOWNLOAD_DIR"/luci-app-podkop*.$PKG_EXT; then
-            log_error "Failed to install luci-app-podkop"
-            rollback
-        fi
-        track_install "luci-app-podkop"
-    else
-        if ! opkg install "$DOWNLOAD_DIR"/podkop*.$PKG_EXT; then
-            log_error "Failed to install podkop"
-            rollback
-        fi
-        track_install "podkop"
-
-        if ! opkg install "$DOWNLOAD_DIR"/luci-app-podkop*.$PKG_EXT; then
-            log_error "Failed to install luci-app-podkop"
-            rollback
-        fi
-        track_install "luci-app-podkop"
+    if ! opkg install "$DOWNLOAD_DIR"/podkop*.ipk; then
+        log_error "Failed to install podkop"
+        rollback
     fi
+    track_install "podkop"
+
+    if ! opkg install "$DOWNLOAD_DIR"/luci-app-podkop*.ipk; then
+        log_error "Failed to install luci-app-podkop"
+        rollback
+    fi
+    track_install "luci-app-podkop"
 
     # Russian translation
     if [ "$NONINTERACTIVE" -eq 1 ]; then
         if [ "$INSTALL_RUSSIAN" -eq 1 ]; then
-            if [ "$PKG_MGR" = "apk" ]; then
-                apk add --allow-untrusted "$DOWNLOAD_DIR"/luci-i18n-podkop-ru*.$PKG_EXT
-            else
-                opkg install "$DOWNLOAD_DIR"/luci-i18n-podkop-ru*.$PKG_EXT
-            fi
+            opkg install "$DOWNLOAD_DIR"/luci-i18n-podkop-ru*.ipk
         fi
     else
-        echo "Русский язык интерфейса ставим? y/n (Need a Russian translation?)"
+        echo "Р СѓСЃСЃРєРёР№ СЏР·С‹Рє РёРЅС‚РµСЂС„РµР№СЃР° СЃС‚Р°РІРёРј? y/n (Need a Russian translation?)"
         while true; do
             read -r -p '' RUS
             case $RUS in
-            y)
-                if [ "$PKG_MGR" = "apk" ]; then
-                    apk add --allow-untrusted "$DOWNLOAD_DIR"/luci-i18n-podkop-ru*.$PKG_EXT
-                else
-                    opkg install "$DOWNLOAD_DIR"/luci-i18n-podkop-ru*.$PKG_EXT
-                fi
-                break
-                ;;
+            y) opkg install "$DOWNLOAD_DIR"/luci-i18n-podkop-ru*.ipk; break ;;
             n) break ;;
             *) echo "Please enter y or n" ;;
             esac
@@ -521,7 +451,7 @@ main() {
     fi
 
     # Cleanup
-    rm -f "$DOWNLOAD_DIR"/*.$PKG_EXT
+    rm -f "$DOWNLOAD_DIR"/podkop*.ipk "$DOWNLOAD_DIR"/luci-app-podkop*.ipk "$DOWNLOAD_DIR"/luci-i18n-podkop-ru*.ipk
 
     if [ "$IS_SHOULD_RESTART_NETWORK" ]; then
         log_step "Restarting network"
@@ -694,7 +624,7 @@ handler_network_restart() {
 }
 
 install_awg_packages() {
-    # Получение pkgarch с наибольшим приоритетом
+    # РџРѕР»СѓС‡РµРЅРёРµ pkgarch СЃ РЅР°РёР±РѕР»СЊС€РёРј РїСЂРёРѕСЂРёС‚РµС‚РѕРј
     PKGARCH=$(opkg print-architecture | awk 'BEGIN {max=0} {if ($3 > max) {max = $3; arch = $2}} END {print arch}')
 
     TARGET=$(ubus call system board | jsonfilter -e '@.release.target' | cut -d '/' -f 1)
