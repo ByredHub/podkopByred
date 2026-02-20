@@ -445,7 +445,14 @@ main() {
     fi
 
     # Install podkop packages
+    # If not using sing-box, skip its dependency with --force-depends (saves ~43MB)
     log_step "Installing podkop packages"
+    OPKG_EXTRA=""
+    if [ "$TUNNEL" != "1" ] && [ "$PKG_MGR" = "opkg" ]; then
+        OPKG_EXTRA="--force-depends"
+        log_info "Skipping sing-box dependency (not needed for this tunnel type)"
+    fi
+
     if [ "$PKG_MGR" = "apk" ]; then
         if ! apk add --allow-untrusted "$DOWNLOAD_DIR"/podkop*.$PKG_EXT; then
             log_error "Failed to install podkop"
@@ -459,13 +466,13 @@ main() {
         fi
         track_install "luci-app-podkop"
     else
-        if ! opkg install "$DOWNLOAD_DIR"/podkop*.$PKG_EXT; then
+        if ! opkg install $OPKG_EXTRA "$DOWNLOAD_DIR"/podkop*.$PKG_EXT; then
             log_error "Failed to install podkop"
             rollback
         fi
         track_install "podkop"
 
-        if ! opkg install "$DOWNLOAD_DIR"/luci-app-podkop*.$PKG_EXT; then
+        if ! opkg install $OPKG_EXTRA "$DOWNLOAD_DIR"/luci-app-podkop*.$PKG_EXT; then
             log_error "Failed to install luci-app-podkop"
             rollback
         fi
